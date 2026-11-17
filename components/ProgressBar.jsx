@@ -8,7 +8,7 @@ export default function ProgressBar({
   isMuted = false,
   onToggleMute = () => {},
   currentScene = 0,
-  totalScenes = 3,
+  totalScenes = 6,
 }) {
   const clampedScore = Math.max(0, Math.min(100, score));
 

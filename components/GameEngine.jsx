@@ -1,20 +1,44 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GAME_SCENES } from '../lib/gameData';
 import { soundManager } from '../lib/audio';
 import ProgressBar from './ProgressBar';
 import SceneCard from './SceneCard';
 import DialogueOptions from './DialogueOptions';
+import TypingIndicator from './TypingIndicator';
 import WinScreen from './WinScreen';
 import GameOverScreen from './GameOverScreen';
 
 export default function GameEngine() {
-  const [moodScore, setMoodScore] = useState(50);
+  const [moodScore, setMoodScore] = useState(40);
   const [currentScene, setCurrentScene] = useState(0);
   const [gameState, setGameState] = useState('playing'); // 'playing' | 'won' | 'lost'
+  const [isTyping, setIsTyping] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  const transitionTimerRef = useRef(null);
+
+  // Clean 1.5s typing delay without synchronous setState in effect
+  useEffect(() => {
+    if (!isTyping || gameState !== 'playing') return;
+
+    const timer = setTimeout(() => {
+      setIsTyping(false);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [isTyping, currentScene, gameState]);
+
+  // Cleanup transition timer on unmount
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+    };
+  }, []);
 
   const toggleMute = () => {
     const nextMuted = !isMuted;
@@ -26,30 +50,30 @@ export default function GameEngine() {
   };
 
   const handleSelectOption = (option) => {
-    if (isTransitioning) return;
+    if (isTransitioning || isTyping) return;
     soundManager.init();
 
+    // Cap mood score between 0 and 100
     const newScore = Math.max(0, Math.min(100, moodScore + option.score));
     setMoodScore(newScore);
 
+    // Audio feedback based on score delta
     if (option.score > 0) {
       soundManager.playPositive();
-    } else {
+    } else if (option.score < 0) {
       soundManager.playNegative();
+    } else {
+      soundManager.playClick();
     }
 
     setIsTransitioning(true);
 
-    setTimeout(() => {
-      // 1. Win Condition
-      if (newScore >= 100) {
-        setGameState('won');
-        soundManager.playWin();
-        setIsTransitioning(false);
-        return;
-      }
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+    }
 
-      // 2. Game Over Condition (Score hit 0)
+    transitionTimerRef.current = setTimeout(() => {
+      // Rule 1: If moodScore <= 0 at ANY point -> Trigger Game Over screen immediately
       if (newScore <= 0) {
         setGameState('lost');
         soundManager.playGameOver();
@@ -57,24 +81,30 @@ export default function GameEngine() {
         return;
       }
 
-      // 3. Move to next scene if available
+      // Rule 2: Do NOT trigger Win early by reaching 100.
+      // Progress through all 6 scenes (indexes 0 to 5).
       if (currentScene < GAME_SCENES.length - 1) {
         setCurrentScene((prev) => prev + 1);
+        setIsTyping(true);
         setIsTransitioning(false);
       } else {
-        // Final scene reached without 100% -> Game Over (Sent to the couch)
-        setGameState('lost');
-        soundManager.playGameOver();
+        // Rule 3: Player completes Scene 5 (index 5) and moodScore > 0 -> Trigger Win screen!
+        setGameState('won');
+        soundManager.playWin();
         setIsTransitioning(false);
       }
     }, 280);
   };
 
   const handleRestart = () => {
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+    }
     soundManager.playClick();
-    setMoodScore(50);
+    setMoodScore(40);
     setCurrentScene(0);
     setGameState('playing');
+    setIsTyping(true);
     setIsTransitioning(false);
   };
 
@@ -92,16 +122,22 @@ export default function GameEngine() {
       />
 
       {/* Main Game Stage */}
-      <main className="flex-1 w-full max-w-4xl lg:max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-8 flex flex-col justify-center items-center">
+      <main className="flex-1 w-full max-w-4xl lg:max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-6 flex flex-col justify-center items-center">
         {gameState === 'playing' && currentSceneData && (
           <div className="w-full animate-pop-in">
-            {/* Two-column on desktop (Left: photo, Right: context + dialogue) */}
+            {/* Two-column scene container (Left: Photo, Right: Context + Options/Typing) */}
             <SceneCard currentScene={currentScene} scene={currentSceneData}>
-              <DialogueOptions
-                options={currentSceneData.options}
-                onSelectOption={handleSelectOption}
-                disabled={isTransitioning}
-              />
+              {isTyping ? (
+                <TypingIndicator />
+              ) : (
+                <div className="animate-pop-in">
+                  <DialogueOptions
+                    options={currentSceneData.options}
+                    onSelectOption={handleSelectOption}
+                    disabled={isTransitioning}
+                  />
+                </div>
+              )}
             </SceneCard>
           </div>
         )}
@@ -122,8 +158,8 @@ export default function GameEngine() {
       </main>
 
       {/* Sleek Minimal Footer */}
-      <footer className="w-full py-3 px-4 text-center text-[11px] text-rose-950/60 border-t border-rose-900/10 backdrop-blur-xs">
-        <p>akzi-simulator • Для Акзейнеп от Али 💖</p>
+      <footer className="w-full py-2.5 px-4 text-center text-[11px] text-rose-950/60 border-t border-rose-900/10 backdrop-blur-xs">
+        <p>akzi-simulator • Для Акзейнеп от Али 💖 • 6 февраля</p>
       </footer>
     </div>
   );
